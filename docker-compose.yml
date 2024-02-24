@@ -1,5 +1,6 @@
 services:
   api1: &api
+    container_name: api1
     image: ruby:3.3.0
     volumes:
       - .:/app
@@ -7,10 +8,16 @@ services:
     command: bash -c "bundle install && ruby server.rb"
     environment:
       - RUBY_YJIT_ENABLE=1
+      - PORT=3001
+    network_mode: host
 
   api2: 
     <<: *api
     container_name: api2
+    environment:
+      - RUBY_YJIT_ENABLE=1
+      - PORT=3002
+    network_mode: host
 
   nginx:
     container_name: nginx
