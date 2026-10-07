@@ -18,7 +18,13 @@ CARGA=10 ./teste-carga.sh  # 10x as requisições/s oficiais
 
 ### Resultado local
 
-![resultado do teste de carga](stress_test.png)
+Carga oficial:
+
+![resultado do teste de carga oficial](stress_test.png)
+
+15x a carga oficial (`CARGA=15`):
+
+![resultado do teste de carga 15x](stress_test_15x.png)
 
 ### Referências:
 
