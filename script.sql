@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS transactions (
 	FOREIGN KEY (account_id) REFERENCES accounts(id)
 );
 
+CREATE INDEX IF NOT EXISTS transactions_account_id_id ON transactions (account_id, id DESC);
+
 DO $$
 BEGIN
 	INSERT INTO accounts (name, limit_amount, balance)

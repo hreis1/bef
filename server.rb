@@ -2,147 +2,101 @@
 
 require 'socket'
 require 'json'
+require 'time'
 require 'pg'
+
+class InvalidDataError < StandardError; end
+class NotFoundError < StandardError; end
+
+STATUS = { 200 => 'OK', 404 => 'Not Found', 422 => 'Unprocessable Entity', 500 => 'Internal Server Error' }.freeze
+ROTA = %r{\A/clientes/(\d+)/(extrato|transacoes)\z}
+
+conn = PG.connect(host: ENV.fetch('DB_HOST', 'localhost'), user: 'postgres', password: 'postgres', dbname: 'postgres')
+
+# Uma única instrução por request: snapshot consistente no extrato e débito atômico sem SELECT FOR UPDATE.
+conn.prepare('extrato', <<~SQL)
+  SELECT balance, limit_amount, COALESCE((
+    SELECT json_agg(t) FROM (
+      SELECT amount AS valor, transaction_type AS tipo, description AS descricao, date AS realizada_em
+      FROM transactions WHERE account_id = accounts.id ORDER BY id DESC LIMIT 10
+    ) t
+  ), '[]') AS ultimas_transacoes
+  FROM accounts WHERE id = $1
+SQL
+conn.prepare('transacao', <<~SQL)
+  WITH conta AS (
+    UPDATE accounts SET balance = balance + $2
+    WHERE id = $1 AND balance + $2 >= -limit_amount
+    RETURNING balance, limit_amount
+  ), nova AS (
+    INSERT INTO transactions (account_id, amount, transaction_type, description)
+    SELECT $1, $3, $4, $5 FROM conta
+  )
+  SELECT balance, limit_amount FROM conta
+SQL
+
+# Clientes não são criados em runtime: distingue 404 de 422 sem ida ao banco.
+CLIENTES = conn.exec('SELECT id FROM accounts').column_values(0).map(&:to_i).freeze
+
+def ler_request(client)
+  verbo, caminho = client.gets&.split(' ', 3)
+  tamanho = 0
+  while (linha = client.gets) && linha != "\r\n"
+    tamanho = linha.split(':', 2)[1].to_i if linha.downcase.start_with?('content-length:')
+  end
+  [verbo, caminho, tamanho.positive? ? client.read(tamanho) : nil]
+end
+
+def extrato(conn, id)
+  conta = conn.exec_prepared('extrato', [id]).first
+  saldo = { total: conta['balance'].to_i, data_extrato: Time.now.utc.iso8601(6), limite: conta['limit_amount'].to_i }
+  %({"saldo":#{saldo.to_json},"ultimas_transacoes":#{conta['ultimas_transacoes']}})
+end
+
+def transacao(conn, id, body)
+  dados = JSON.parse(body.to_s)
+  raise InvalidDataError unless dados.is_a?(Hash)
+
+  valor, tipo, descricao = dados.values_at('valor', 'tipo', 'descricao')
+  raise InvalidDataError unless valor.is_a?(Integer) && valor.positive? && %w[c d].include?(tipo)
+  raise InvalidDataError unless descricao.is_a?(String) && descricao.length.between?(1, 10)
+
+  conta = conn.exec_prepared('transacao', [id, tipo == 'd' ? -valor : valor, valor, tipo, descricao]).first
+  raise InvalidDataError unless conta
+
+  { saldo: conta['balance'].to_i, limite: conta['limit_amount'].to_i }.to_json
+end
+
+def atender(client, conn)
+  verbo, caminho, body = ler_request(client)
+  _, id, acao = ROTA.match(caminho.to_s).to_a
+  raise NotFoundError unless CLIENTES.include?(id.to_i)
+
+  case [verbo, acao]
+  in ['GET', 'extrato'] then [200, extrato(conn, id.to_i)]
+  in ['POST', 'transacoes'] then [200, transacao(conn, id.to_i, body)]
+  else raise NotFoundError
+  end
+rescue NotFoundError
+  [404, '{}']
+rescue InvalidDataError, JSON::ParserError
+  [422, '{}']
+rescue StandardError => e
+  warn e.full_message
+  [500, '{}']
+end
 
 server = TCPServer.new(3000)
 puts 'Server started'
 $stdout.flush
 
-class InvalidDataError < StandardError; end
-class NotFoundError < StandardError; end
-
-def parse_request(client)
-  line = client.gets
-  verb, path, version = line.split(' ')
-  puts "Verb: #{verb}, Path: #{path}, Version: #{version}"
-  id = path.split('/')[2].to_i
-  puts id
-  action = path.split('/')[3]
-  request = "#{verb} /clientes/:id/#{action}"
-
-  params = { 'id' => id }
-
-  headers = {}
-  while (line = client.gets)
-    break if line == "\r\n"
-
-    key, value = line.split(': ')
-    headers[key] = value.strip
-  end
-  if headers['Content-Length']
-    body = client.read(headers['Content-Length'].to_i)
-    params.merge!(JSON.parse(body))
-  end
-  [request, params]
-end
-
-conn = PG.connect(host: ENV['DB_HOST'] || 'localhost',
-                  user: 'postgres',
-                  password: 'postgres',
-                  dbname: 'postgres',
-                  port: 5432)
-
 loop do
   client = server.accept
-  request, params = parse_request(client)
-  raise NotFoundError if params.empty?
-  puts "Request: #{request}, Params: #{params}"
-  id = params['id']
-  raise NotFoundError if id.nil?
-  raise NotFoundError unless id.is_a?(Integer) && id.positive?
-
-  case request
-  in 'GET /clientes/:id/extrato'
-    sql_account = "SELECT * FROM accounts WHERE id = #{id} LIMIT 1 FOR UPDATE"
-    sql_transactions = <<~SQL
-      SELECT amount, transaction_type, description, TO_CHAR(date, 'YYYY-MM-DD HH:MI:SS.US') AS date
-      FROM transactions
-      WHERE transactions.account_id = #{id}
-      ORDER BY date DESC
-      LIMIT 10
-    SQL
-
-    conn.transaction do |c|
-      account = c.exec(sql_account).first
-      raise NotFoundError unless account
-
-      transactions = c.exec(sql_transactions)
-
-      body = {
-        "saldo": {
-          "total": account['balance'].to_i,
-          "data_extrato": Time.now.strftime('%Y-%m-%d'),
-          "limite": account['limit_amount'].to_i
-        },
-        "ultimas_transacoes": transactions.map do |transaction|
-          {
-            "valor": transaction['amount'].to_i,
-            "tipo": transaction['transaction_type'],
-            "descricao": transaction['description'],
-            "realizada_em": transaction['date']
-          }
-        end
-      }
-      puts 'Success!'
-      client.puts "HTTP/1.1 200\r\nContent-Type: application/json\r\n\r\n#{body.to_json}"
-      client.close
-    end
-  in 'POST /clientes/:id/transacoes'
-    raise InvalidDataError if params.empty? || params.nil?
-
-    valor = params['valor']
-    tipo = params['tipo']
-    descricao = params['descricao']
-
-    raise InvalidDataError if id.nil? || valor.nil? || tipo.nil? || descricao.nil?
-    raise InvalidDataError if valor && (!valor.is_a?(Integer) || !valor.positive?)
-    raise InvalidDataError if descricao&.empty?
-    raise InvalidDataError if descricao && descricao.size > 10
-    raise InvalidDataError unless %w[d c].include?(params['tipo'])
-
-    puts "Id: #{id}, Valor: #{valor}, Tipo: #{tipo}, Descricao: #{descricao}"
-
-    conn.transaction do |c|
-      sql_account = "SELECT * FROM accounts WHERE id = #{id} LIMIT 1 FOR UPDATE"
-      
-      account = conn.exec(sql_account).first
-      raise NotFoundError if account.nil?
-      operator = '+'
-      puts "Account: {id: #{account['id']}}"
-      if tipo == 'd'
-        operator = '-'
-        raise InvalidDataError if (account['limit_amount'].to_i + account['balance'].to_i) <= valor
-      end
-
-      sql_insert_transaction = "INSERT INTO transactions (account_id, amount, transaction_type, description, date) VALUES (#{id}, #{valor}, '#{tipo}', '#{descricao}', NOW())"
-
-      sql_update_balance = "UPDATE accounts SET balance = balance #{operator} #{valor} WHERE id = #{id} RETURNING *"
-
-      c.exec(sql_insert_transaction)
-      account = c.exec(sql_update_balance).first
-
-      body = {
-          "saldo": account['balance'].to_i,
-          "limite": account['limit_amount'].to_i
-      }
-
-      puts 'Success!'
-      client.puts "HTTP/1.1 200\r\nContent-Type: application/json\r\n\r\n#{body.to_json}"
-      client.close
-    end
-  else
-    raise NotFoundError
-  end
-rescue NotFoundError
-  puts 'Not found'
-  status = 404
-  body = {}
-  client.puts "HTTP/1.1 #{status}\r\nContent-Type: application/json\r\n\r\n#{body.to_json}"
-  client.close
-rescue InvalidDataError
-  puts 'Invalid data'
-  status = 422
-  body = {}
-  client.puts "HTTP/1.1 #{status}\r\nContent-Type: application/json\r\n\r\n#{body.to_json}"
-  client.close
+  status, body = atender(client, conn)
+  client.write("HTTP/1.1 #{status} #{STATUS[status]}\r\nContent-Type: application/json\r\n" \
+               "Content-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")
+rescue SystemCallError, IOError
+  nil # cliente desconectou antes da resposta
+ensure
+  client&.close
 end

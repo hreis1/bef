@@ -1,20 +1,25 @@
 ### BEF
 
-servidor web com ruby puro e a gem pg para conexão com o banco de dados postgres
+Servidor web síncrono em Ruby puro (`TCPServer` + gem `pg`) para a [Rinha de Backend 2024/Q1](https://github.com/zanfranceschi/rinha-de-backend-2024-q1).
 
-- sem pool de conexões no pg
-- sql select account bloqueante
-- transaction na inserção de dados
-- sem threads no server
-- nginx com 512 conexões por worker
-- recursos iliimitados por enquanto
-- sem newtwork_mode: host
-- sem fsync off no pg
+- 2 APIs single-thread, uma conexão com o Postgres por processo, atrás do nginx
+- uma instrução SQL por request: débito atômico via `UPDATE ... WHERE balance + valor >= -limite` + `INSERT` na mesma CTE; extrato num único snapshot
+- statements preparados
+- recursos dentro da regra: 1,5 CPU e 550MB no total
+- sem `network_mode: host` e sem `fsync off`
 
-lento sim mas funciona e 0 K.O (nem sempre kkkk versão 1.0 inconsistente)
+### Rodando
 
+```sh
+docker compose up -d --build
+./teste-carga.sh   # teste oficial da Rinha (Gatling 3.10.3) em Docker
+```
 
-![alt text](stress_test.png)
+### Resultado local
+
+| Requests | KO | p95 | p99 |
+|---|---|---|---|
+| 61.503 | 0 | 2ms | 3ms |
 
 ### Referências:
 
