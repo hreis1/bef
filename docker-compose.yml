@@ -15,7 +15,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.35"
+          cpus: "0.2"
           memory: "100MB"
 
   api2:
@@ -53,5 +53,5 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.2"
+          cpus: "0.5"
           memory: "50MB"

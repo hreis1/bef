@@ -12,7 +12,8 @@ Servidor web síncrono em Ruby puro (`TCPServer` + gem `pg`) para a [Rinha de Ba
 
 ```sh
 docker compose up -d --build
-./teste-carga.sh   # teste oficial da Rinha (Gatling 3.10.3) em Docker
+./teste-carga.sh           # teste oficial da Rinha (Gatling 3.10.3) em Docker
+CARGA=10 ./teste-carga.sh  # 10x as requisições/s oficiais
 ```
 
 ### Resultado local
