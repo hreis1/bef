@@ -17,9 +17,7 @@ docker compose up -d --build
 
 ### Resultado local
 
-| Requests | KO | p95 | p99 |
-|---|---|---|---|
-| 61.503 | 0 | 2ms | 3ms |
+![resultado do teste de carga](stress_test.png)
 
 ### Referências:
 
