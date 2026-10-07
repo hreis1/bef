@@ -9,6 +9,7 @@ PORTA=${PORTA:-9999}
 PROJETO=${PROJETO:-bef}
 SIM=$DIR/user-files/simulations/rinhabackend/RinhaBackendCrebitosSimulation.scala
 
+mkdir -p $DIR
 if [ ! -d $DIR/gatling ]; then
   curl -sSfL "https://repo1.maven.org/maven2/io/gatling/highcharts/gatling-charts-highcharts-bundle/$VERSAO/gatling-charts-highcharts-bundle-$VERSAO-bundle.zip" -o $DIR/gatling.zip
   unzip -q $DIR/gatling.zip -d $DIR && mv $DIR/gatling-charts-highcharts-bundle-$VERSAO $DIR/gatling && rm $DIR/gatling.zip
