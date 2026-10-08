@@ -26,6 +26,10 @@ Carga oficial:
 
 ![resultado do teste de carga 15x](stress_test_15x.png)
 
+25x a carga oficial (`CARGA=25`):
+
+![resultado do teste de carga 25x](stress_test_25x.png)
+
 ### Referências:
 
 - [Build Your Own Web Server With Ruby](https://www.rubyguides.com/2016/08/build-your-own-web-server/)
