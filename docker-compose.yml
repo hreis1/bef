@@ -4,22 +4,28 @@ services:
     build: .
     environment:
       - DB_HOST=postgres
+      - SOCKET=/sock/api1.sock
+    volumes:
+      - sockets:/sock
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "bash", "-c", "</dev/tcp/localhost/3000"]
+      test: ["CMD-SHELL", "[ -S \"$$SOCKET\" ]"]
       interval: 5s
       start_period: 30s
       start_interval: 1s
     deploy:
       resources:
         limits:
-          cpus: "0.2"
+          cpus: "0.225"
           memory: "50MB"
 
   api2:
     <<: *api
+    environment:
+      - DB_HOST=postgres
+      - SOCKET=/sock/api2.sock
 
   postgres:
     image: postgres:16
@@ -43,6 +49,7 @@ services:
     image: nginx
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
+      - sockets:/sock
     ports:
       - "${PORTA:-9999}:9999"
     depends_on:
@@ -53,5 +60,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
+          cpus: "0.45"
           memory: "200MB"
+
+volumes:
+  sockets:

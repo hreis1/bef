@@ -2,7 +2,7 @@
 
 Servidor web síncrono em Ruby puro (`TCPServer` + gem `pg`) para a [Rinha de Backend 2024/Q1](https://github.com/zanfranceschi/rinha-de-backend-2024-q1).
 
-- 2 APIs single-thread, uma conexão com o Postgres por processo, atrás do nginx
+- 2 APIs single-thread, uma conexão com o Postgres por processo, atrás do nginx via unix socket
 - uma instrução SQL por request: débito atômico via `UPDATE ... WHERE balance + valor >= -limite` + `INSERT` na mesma CTE; extrato num único snapshot
 - statements preparados
 - recursos dentro da regra: 1,5 CPU e 550MB no total

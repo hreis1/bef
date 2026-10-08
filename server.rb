@@ -86,7 +86,13 @@ rescue StandardError => e
   [500, '{}']
 end
 
-server = TCPServer.new(3000)
+# Atrás do nginx, unix socket (SOCKET) custa menos CPU que TCP; sem SOCKET, escuta na 3000.
+server = if (caminho = ENV['SOCKET'])
+  File.unlink(caminho) if File.exist?(caminho)
+  UNIXServer.new(caminho).tap { File.chmod(0o666, caminho) }
+else
+  TCPServer.new(3000)
+end
 puts 'Server started'
 $stdout.flush
 
