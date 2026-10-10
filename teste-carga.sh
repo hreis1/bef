@@ -2,6 +2,7 @@
 # Teste oficial da Rinha de Backend 2024/Q1 (Gatling 3.10.3) rodando em Docker contra o nginx do compose.
 # Recria a stack do zero (down -v) e falha se houver KO ou saldo inconsistente no banco ao final.
 # CARGA multiplica as requisições/s de débitos, créditos e extratos (1 = carga oficial). Ex.: CARGA=3 ./teste-carga.sh
+# SIMULACAO escolhe outra simulação de simulacoes/ (ex.: CapacidadeSimulation, usada pelo teste-rapido.sh).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -11,6 +12,7 @@ COMMIT_RINHA=03af80bb8de97b5723580e9e9a39838382e6e365
 DIR=${DIR:-load-test}
 PROJETO=${PROJETO:-bef}
 CARGA=${CARGA:-1}
+SIMULACAO=${SIMULACAO:-RinhaBackendCrebitosSimulation}
 export PORTA=${PORTA:-9999}
 OFICIAL="$DIR/rinha-oficial.scala"
 SIM="$DIR/user-files/simulations/rinhabackend/RinhaBackendCrebitosSimulation.scala"
@@ -36,6 +38,7 @@ mkdir -p "$(dirname "$SIM")"
 sed -e 's#http://localhost:9999#http://nginx:9999#' \
     -e "s/\.to(\([0-9]*\))/.to(\1 * $CARGA)/" \
     -e "s/constantUsersPerSec(\([0-9]*\))/constantUsersPerSec(\1 * $CARGA)/" "$OFICIAL" > "$SIM"
+cp simulacoes/*.scala "$(dirname "$SIM")/"
 
 compose down -v --remove-orphans
 compose up -d --build
@@ -45,11 +48,11 @@ curl -sf "http://localhost:$PORTA/clientes/1/extrato" > /dev/null || falha "API 
 
 # Cada usuário virtual abre uma conexão nova; sem ampliar as portas e reaproveitar TIME_WAIT,
 # o Gatling esgota as portas de saída (~470 conexões/s) antes do backend.
-docker run --rm --network "${PROJETO}_default" \
+docker run --rm --network "${PROJETO}_default" -e JAVA_OPTS \
   --sysctl net.ipv4.ip_local_port_range="1024 65535" --sysctl net.ipv4.tcp_tw_reuse=1 \
   -v "$(cd "$DIR" && pwd):/load-test" eclipse-temurin:21-jdk \
-  /load-test/gatling/bin/gatling.sh -rm local -s RinhaBackendCrebitosSimulation \
-  -rd "Rinha de Backend - 2024/Q1: Crébito (carga x$CARGA)" \
+  /load-test/gatling/bin/gatling.sh -rm local -s "$SIMULACAO" \
+  -rd "Rinha de Backend - 2024/Q1: Crébito ($SIMULACAO, carga x$CARGA)" \
   -rf /load-test/results -sf /load-test/user-files/simulations | tee "$LOG"
 
 grep -q 'request count.*KO=0 ' "$LOG" || falha "houve KO, veja $LOG"
