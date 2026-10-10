@@ -14,7 +14,9 @@ ROTA = %r{\A/clientes/(\d+)/(extrato|transacoes)\z}
 conn = PG.connect(host: ENV.fetch('DB_HOST', 'localhost'), user: 'postgres', password: 'postgres', dbname: 'postgres')
 
 # Uma única instrução por request: snapshot consistente no extrato e débito atômico sem SELECT FOR UPDATE.
-conn.prepare('extrato', <<~SQL)
+# O extrato não é preparado: um plano guardado com transactions vazia lê todas as transações da conta
+# em vez das 10 mais recentes pelo índice, e o custo cresce com a tabela até o primeiro autovacuum.
+SQL_EXTRATO = <<~SQL
   SELECT balance, limit_amount, COALESCE((
     SELECT json_agg(t) FROM (
       SELECT amount AS valor, transaction_type AS tipo, description AS descricao, date AS realizada_em
@@ -48,7 +50,7 @@ def ler_request(client)
 end
 
 def extrato(conn, id)
-  conta = conn.exec_prepared('extrato', [id]).first
+  conta = conn.exec_params(SQL_EXTRATO, [id]).first
   saldo = { total: conta['balance'].to_i, data_extrato: Time.now.utc.iso8601(6), limite: conta['limit_amount'].to_i }
   %({"saldo":#{saldo.to_json},"ultimas_transacoes":#{conta['ultimas_transacoes']}})
 end
